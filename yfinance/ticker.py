@@ -64,7 +64,11 @@ class Ticker(TickerBase):
                 self._expirations[_datetime.datetime.utcfromtimestamp(
                     exp).strftime('%Y-%m-%d')] = exp
             opt = r['optionChain']['result'][0].get('options', [])
-            return opt[0] if len(opt) > 0 else []
+            if opt and (opt[0].get('calls', []) or opt[0].get('puts', [])):
+                opt[0]['quote'] = r['optionChain']['result'][0].get('quote', {})
+                return opt[0]
+            else:
+                return []
 
     def _options2df(self, opt, tz=None):
         data = _pd.DataFrame(opt).reindex(columns=[
@@ -93,17 +97,14 @@ class Ticker(TickerBase):
         if date is None:
             options = self._download_options(proxy=proxy)
         else:
-            if not self._expirations:
-                self._download_options()
-            if date not in self._expirations:
-                raise ValueError(
-                    "Expiration `%s` cannot be found. "
-                    "Available expiration are: [%s]" % (
-                        date, ', '.join(self._expirations)))
-            date = self._expirations[date]
-            options = self._download_options(date, proxy=proxy)
+            exp_date = _datetime.datetime.strptime(date, '%Y-%m-%d')
+            timestamp_ = str(int(_datetime.datetime(exp_date.year, exp_date.month, exp_date.day).replace(tzinfo=_datetime.timezone.utc).timestamp()))
+            options = self._download_options(timestamp_, proxy=proxy)
+            if not options:
+                raise LookupError(f"No options found for ticker {self.ticker} at date {str(exp_date.date())}")
 
-        return _namedtuple('Options', ['calls', 'puts'])(**{
+        return _namedtuple('Options', ['quote', 'calls', 'puts'])(**{
+            "quote": options['quote'] if len(options) != 0 else [],
             "calls": self._options2df(options['calls'], tz=tz),
             "puts": self._options2df(options['puts'], tz=tz)
         })
